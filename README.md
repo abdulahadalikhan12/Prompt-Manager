@@ -24,11 +24,23 @@ prompt-service — it only knows prompt-service's HTTP API.
 ## Services
 
 ### prompt-service (port 8000)
-- FastAPI + SQLAlchemy + Postgres
+- FastAPI + SQLAlchemy + Postgres, with Alembic-managed schema migrations
 - Owns the `prompts` table exclusively
 - Endpoints: `POST /prompts`, `GET /prompts`, `GET /prompts/{id}`,
   `PUT /prompts/{id}` (partial update supported), `DELETE /prompts/{id}`,
   `GET /prompts/{id}/exists`
+- Structure:
+  ```
+  prompt-service/
+  ├── core/config.py          # .env settings, one source of truth
+  ├── database.py             # SQLAlchemy engine/session (cross-cutting, not under core/)
+  ├── models.py                # Prompt ORM model
+  ├── schemas.py                # Pydantic request/response shapes
+  ├── services/prompt_service.py  # all CRUD logic, called by the router
+  ├── routers/prompts.py          # thin HTTP layer, delegates to PromptService
+  ├── alembic/                    # schema migrations
+  └── main.py
+  ```
 
 ### review-service (port 8001)
 - FastAPI + httpx + per-file JSON storage (`reviews/<uuid>.json`)
@@ -37,6 +49,19 @@ prompt-service — it only knows prompt-service's HTTP API.
   unreachable
 - Endpoints: `POST /reviews`, `GET /reviews`, `GET /reviews/{id}`,
   `GET /reviews/{prompt_id}/summary`
+- Structure:
+  ```
+  review-service/
+  ├── core/config.py              # .env settings
+  ├── storage.py                   # per-file JSON read/write
+  ├── schemas.py
+  ├── services/review_service.py     # httpx call + storage orchestration
+  ├── routers/reviews.py              # thin HTTP layer
+  └── main.py
+  ```
+  Deliberately has NO `models.py` and NO `alembic/` -- there is no
+  database here at all, by design (see Rules of Engagement in the
+  original spec: "No database sharing between services").
 
 ### frontend
 - Vite + React, calls both services via relative paths (`/prompts`, `/reviews`)
@@ -62,6 +87,11 @@ Edit `.env` and set your real Postgres password:
 ```
 DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/prompt_manager
 SERVICE_PORT=8000
+```
+Generate and apply the initial migration (one-time):
+```
+alembic revision --autogenerate -m "create prompts table"
+alembic upgrade head
 ```
 Run:
 ```
@@ -140,7 +170,15 @@ curl http://localhost:8001/reviews/<id>/summary
   change — review-service only ever talks to prompt-service over HTTP.
 - **Why JSON files for review-service, not Postgres too**: deliberate
   contrast in persistence patterns, as specified in the original brief.
-- **404 vs 503**: a 404 means prompt-service responded and said "not found";
-  a 503 means prompt-service itself could not be reached at all. These are
-  distinguished using `httpx.RequestError` (network failure) vs checking
-  `response.status_code` (an actual HTTP response).
+- **Why a `services/` layer**: routers only translate HTTP in and out;
+  all actual CRUD/business logic lives in `PromptService` / `ReviewService`.
+  This means the storage mechanism could change again without touching
+  any route definitions or URL contracts.
+- **Why Alembic instead of `Base.metadata.create_all()`**: `create_all()`
+  can only create tables that don't exist yet -- it can't alter an
+  existing column, track what changed, or roll back. Now that this is a
+  real Postgres database (not the original SQLite spec), Alembic is the
+  standard tool for managing schema changes safely over time.
+- **Why review-service has no `models.py` or `alembic/`**: there is no
+  database connection in this service at all -- the absence of these
+  folders is itself evidence of that boundary, not an oversight.

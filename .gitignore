@@ -6,6 +6,9 @@ venv/
 __pycache__/
 *.pyc
 
+# SQLite files used only for local testing/verification, never real storage
+test_verify.db
+
 # Node / frontend
 node_modules/
 dist/

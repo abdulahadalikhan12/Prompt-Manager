@@ -1,13 +1,11 @@
 from fastapi import FastAPI
 
-from database import Base, engine
-import models  # noqa: F401 -- must be imported so SQLAlchemy registers the Prompt model
+import models  # noqa: F401 -- kept so SQLAlchemy's metadata stays aware of Prompt
 from routers import prompts
 
-# Creates the "prompts" table if it doesn't already exist. Equivalent
-# to the spec's "Database and table are created on startup if they do
-# not exist" -- this is SQLAlchemy's version of CREATE TABLE IF NOT EXISTS.
-Base.metadata.create_all(bind=engine)
+# NOTE: table creation is handled by Alembic migrations now, not by
+# Base.metadata.create_all(). Run `alembic upgrade head` once before
+# starting this service for the first time -- see README.
 
 app = FastAPI(
     title="Prompt Service",

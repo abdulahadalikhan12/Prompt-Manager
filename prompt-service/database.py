@@ -1,16 +1,12 @@
-import os
-from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-load_dotenv()
-
-DATABASE_URL = os.getenv("DATABASE_URL")
+from core.config import settings
 
 # The engine is the actual connection pool to Postgres. Created once,
 # reused for the lifetime of the app -- we don't open a new connection
 # for every request, that would be wasteful.
-engine = create_engine(DATABASE_URL)
+engine = create_engine(settings.DATABASE_URL)
 
 # SessionLocal is a factory for creating new database sessions. Each
 # request gets its OWN session (see get_db() below) so that concurrent

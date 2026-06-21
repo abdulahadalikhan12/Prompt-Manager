@@ -1,0 +1,17 @@
+# Environment / secrets
+.env
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Node / frontend
+node_modules/
+dist/
+
+# Review service storage (generated at runtime, not source)
+review-service/reviews/
+
+# OS
+.DS_Store

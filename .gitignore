@@ -11,7 +11,8 @@ node_modules/
 dist/
 
 # Review service storage (generated at runtime, not source)
-review-service/reviews/
+review-service/reviews/*
+!review-service/reviews/.gitkeep
 
 # OS
 .DS_Store

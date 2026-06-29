@@ -13,6 +13,8 @@ class Settings:
     """
     DATABASE_URL: str = os.getenv("DATABASE_URL")
     SERVICE_PORT: int = int(os.getenv("SERVICE_PORT", "8000"))
+    # Week 2: where to reach llm-service for execute/follow-up/summary calls.
+    LLM_SERVICE_URL: str = os.getenv("LLM_SERVICE_URL", "http://localhost:8002")
 
 
 settings = Settings()

@@ -1,8 +1,9 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, Text, DateTime
+from sqlalchemy import Column, String, Text, DateTime, Integer, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 
 from database import Base
 
@@ -27,3 +28,57 @@ class Prompt(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
                          onupdate=lambda: datetime.now(timezone.utc))
+
+    chats = relationship("Chat", back_populates="prompt", cascade="all, delete-orphan")
+
+
+class Chat(Base):
+    """
+    Week 2 addition. A Chat is created when a prompt is "executed" --
+    it represents one ongoing conversation with the model, seeded from
+    a specific prompt's content. Unlike Week 1 (where a prompt was just
+    stored text), a Chat is where that text actually gets run.
+
+    Uses a REAL SQLAlchemy ForeignKey to prompts.id, unlike review-service's
+    prompt_id (which is "a foreign reference, not a DB foreign key" per
+    the Week 1 brief) -- the difference is ownership: Chat lives in the
+    SAME database as Prompt, owned by the same service, so a real FK
+    constraint is appropriate here. review-service's prompt_id points
+    at a row in a DIFFERENT service's database entirely, where a real
+    FK is not even possible.
+    """
+    __tablename__ = "chats"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    prompt_id = Column(UUID(as_uuid=True), ForeignKey("prompts.id"), nullable=False)
+    title = Column(String, nullable=True)
+    total_tokens = Column(Integer, default=0, nullable=False)
+    summary = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+                         onupdate=lambda: datetime.now(timezone.utc))
+
+    prompt = relationship("Prompt", back_populates="chats")
+    messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan",
+                             order_by="Message.created_at")
+
+
+class Message(Base):
+    """
+    One turn in a Chat -- either the user's message or the assistant's
+    reply. Token usage is stored per message (0 for user messages, real
+    values for assistant replies, since OpenRouter only reports usage
+    for the completion it generated) and summed up to Chat.total_tokens.
+    """
+    __tablename__ = "messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    chat_id = Column(UUID(as_uuid=True), ForeignKey("chats.id"), nullable=False)
+    role = Column(String, nullable=False)  # "user" or "assistant"
+    content = Column(Text, nullable=False)
+    prompt_tokens = Column(Integer, default=0, nullable=False)
+    completion_tokens = Column(Integer, default=0, nullable=False)
+    total_tokens = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    chat = relationship("Chat", back_populates="messages")

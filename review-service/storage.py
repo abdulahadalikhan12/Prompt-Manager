@@ -2,19 +2,16 @@ import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 
 class ReviewStorage:
     """
     Stores each review as its OWN JSON file inside reviews/, named by
-    the review's UUID -- e.g. reviews/7f96a48e-....json.
-
-    This is deliberately different from prompt-service's single Postgres
-    table. The spec wants the contrast: one service learns "everything
-    in one relational table," the other learns "one file per record."
-    Neither service imports or touches the other's storage at all --
-    that boundary is what makes them genuinely independent services.
+    the review's UUID. Deliberately different from prompt-service's
+    Postgres table -- this contrast is the intentional teaching point
+    from Week 1, still true in Week 2 even though reviews now also
+    cover full chats.
     """
 
     def __init__(self, directory: str):
@@ -35,20 +32,31 @@ class ReviewStorage:
             return None
         return json.loads(path.read_text(encoding="utf-8"))
 
-    def get_all(self, prompt_id: Optional[str] = None) -> List[dict]:
+    def get_all(self, prompt_id: Optional[str] = None, chat_id: Optional[str] = None) -> List[dict]:
         reviews = []
         for file in self.dir.glob("*.json"):
             data = json.loads(file.read_text(encoding="utf-8"))
-            if prompt_id is None or data["prompt_id"] == prompt_id:
-                reviews.append(data)
+            if prompt_id is not None and data.get("prompt_id") != prompt_id:
+                continue
+            if chat_id is not None and data.get("chat_id") != chat_id:
+                continue
+            reviews.append(data)
         return reviews
 
-    def create(self, prompt_id: str, prompt_snapshot: str, reviewer_name: str,
-               score: int, feedback: str) -> dict:
+    def create(self, target_type: str, prompt_id: Optional[str], chat_id: Optional[str],
+               snapshot: Any, reviewer_name: str, score: int, feedback: str) -> dict:
+        """
+        snapshot is now Any rather than str -- for a prompt review it's
+        still plain text, but for a chat review it's the full chat
+        object (a dict with nested messages) returned by prompt-service.
+        json.dumps handles either shape fine when writing to disk.
+        """
         review = {
             "id": str(uuid.uuid4()),
+            "target_type": target_type,
             "prompt_id": prompt_id,
-            "prompt_snapshot": prompt_snapshot,
+            "chat_id": chat_id,
+            "snapshot": snapshot,
             "reviewer_name": reviewer_name,
             "score": score,
             "feedback": feedback,

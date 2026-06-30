@@ -1,7 +1,7 @@
 from uuid import UUID
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from schemas import ReviewCreate, ReviewOut, ReviewSummary
 from storage import ReviewStorage
@@ -10,13 +10,11 @@ from services.review_service import ReviewService
 router = APIRouter(prefix="/reviews", tags=["reviews"])
 
 
-def get_review_service() -> ReviewService:
-    """
-    Same Depends pattern as prompt-service's get_prompt_service --
-    builds the storage layer and hands a ReviewService to the route.
-    """
+def get_review_service(request: Request) -> ReviewService:
+    """Builds a ReviewService using the storage layer and the shared
+    httpx.AsyncClient set up in main.py's lifespan."""
     storage = ReviewStorage(directory="reviews")
-    return ReviewService(storage)
+    return ReviewService(storage, request.app.state.http_client)
 
 
 @router.post("", response_model=ReviewOut, status_code=201)
@@ -25,8 +23,12 @@ async def create_review(payload: ReviewCreate, service: ReviewService = Depends(
 
 
 @router.get("", response_model=list[ReviewOut])
-def list_reviews(prompt_id: Optional[UUID] = Query(default=None), service: ReviewService = Depends(get_review_service)):
-    return service.list(prompt_id=prompt_id)
+def list_reviews(
+    prompt_id: Optional[UUID] = Query(default=None),
+    chat_id: Optional[UUID] = Query(default=None),
+    service: ReviewService = Depends(get_review_service),
+):
+    return service.list_reviews(prompt_id=prompt_id, chat_id=chat_id)
 
 
 @router.get("/{review_id}", response_model=ReviewOut)
@@ -37,6 +39,11 @@ def get_review(review_id: UUID, service: ReviewService = Depends(get_review_serv
     return review
 
 
+@router.get("/chat/{chat_id}/summary", response_model=ReviewSummary)
+def get_chat_review_summary(chat_id: UUID, service: ReviewService = Depends(get_review_service)):
+    return service.summary_for_chat(chat_id)
+
+
 @router.get("/{prompt_id}/summary", response_model=ReviewSummary)
-def get_review_summary(prompt_id: UUID, service: ReviewService = Depends(get_review_service)):
-    return service.summary(prompt_id)
+def get_prompt_review_summary(prompt_id: UUID, service: ReviewService = Depends(get_review_service)):
+    return service.summary_for_prompt(prompt_id)

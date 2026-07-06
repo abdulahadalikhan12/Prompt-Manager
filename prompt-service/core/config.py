@@ -14,7 +14,7 @@ class Settings:
     DATABASE_URL: str = os.getenv("DATABASE_URL")
     SERVICE_PORT: int = int(os.getenv("SERVICE_PORT", "8000"))
     # Week 2: where to reach llm-service for execute/follow-up/summary calls.
-    LLM_SERVICE_URL: str = os.getenv("LLM_SERVICE_URL", "http://localhost:8002")
+    LLM_SERVICE_URL: str = os.getenv("LLM_SERVICE_URL", "http://llm-service:8002")
     # If true, alembic upgrade head runs automatically at startup
     # (see run_migrations.py) -- useful for deployments with no
     # interactive terminal. Defaults to false so local development

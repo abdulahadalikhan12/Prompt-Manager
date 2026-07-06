@@ -1,0 +1,143 @@
+
+services:
+
+  postgres:
+    image: postgres:17
+    container_name: postgres
+
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: prompt_manager
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: pgadmin
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    networks:
+      - prompt-network
+
+  llm-service:
+    build:
+      context: ./llm-service
+    image: abdulahadalikhan12/llm-service:latest
+    
+    container_name: llm-service
+
+    restart: unless-stopped
+
+    env_file:
+      - ./llm-service/.env
+
+    ports:
+      - "8002:8002"
+
+    networks:
+      - prompt-network
+
+  document-service:
+    build:
+      context: ./document-service
+    image: abdulahadalikhan12/document-service:latest
+    
+    container_name: document-service
+
+    restart: unless-stopped
+
+    env_file:
+      - ./document-service/.env
+
+    ports:
+      - "8003:8003"
+
+    networks:
+      - prompt-network
+
+  prompt-service:
+    build:
+      context: ./prompt-service
+    image: abdulahadalikhan12/prompt-service:latest
+    
+    container_name: prompt-service
+
+    restart: unless-stopped
+
+    env_file:
+      - ./prompt-service/.env
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      llm-service:
+        condition: service_started
+      document-service:
+        condition: service_started
+
+    ports:
+      - "8000:8000"
+
+    networks:
+      - prompt-network
+
+  review-service:
+    build:
+      context: ./review-service
+    image: abdulahadalikhan12/review-service:latest
+    
+    container_name: review-service
+
+    restart: unless-stopped
+
+    env_file:
+      - ./review-service/.env
+
+    depends_on:
+      prompt-service:
+        condition: service_started
+
+    ports:
+      - "8001:8001"
+
+    networks:
+      - prompt-network
+
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    image: abdulahadalikhan12/nginx:latest
+    
+    container_name: nginx
+
+    restart: unless-stopped
+
+    depends_on:
+      prompt-service:
+        condition: service_started
+      review-service:
+        condition: service_started
+      document-service:
+        condition: service_started
+
+    ports:
+      - "80:80"
+
+    networks:
+      - prompt-network
+
+networks:
+  prompt-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

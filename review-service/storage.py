@@ -32,7 +32,8 @@ class ReviewStorage:
             return None
         return json.loads(path.read_text(encoding="utf-8"))
 
-    def get_all(self, prompt_id: Optional[str] = None, chat_id: Optional[str] = None) -> List[dict]:
+    def get_all(self, prompt_id: Optional[str] = None, chat_id: Optional[str] = None,
+                message_id: Optional[str] = None) -> List[dict]:
         reviews = []
         for file in self.dir.glob("*.json"):
             data = json.loads(file.read_text(encoding="utf-8"))
@@ -40,22 +41,26 @@ class ReviewStorage:
                 continue
             if chat_id is not None and data.get("chat_id") != chat_id:
                 continue
+            if message_id is not None and data.get("message_id") != message_id:
+                continue
             reviews.append(data)
         return reviews
 
     def create(self, target_type: str, prompt_id: Optional[str], chat_id: Optional[str],
-               snapshot: Any, reviewer_name: str, score: int, feedback: str) -> dict:
+               message_id: Optional[str], snapshot: Any, reviewer_name: str, score: int,
+               feedback: str) -> dict:
         """
-        snapshot is now Any rather than str -- for a prompt review it's
-        still plain text, but for a chat review it's the full chat
-        object (a dict with nested messages) returned by prompt-service.
-        json.dumps handles either shape fine when writing to disk.
+        snapshot is Any rather than str -- a prompt or message review is
+        plain text, a chat review is the full chat object (a dict with
+        nested messages) copied verbatim from prompt-service. json.dumps
+        handles either shape fine when writing to disk.
         """
         review = {
             "id": str(uuid.uuid4()),
             "target_type": target_type,
             "prompt_id": prompt_id,
             "chat_id": chat_id,
+            "message_id": message_id,
             "snapshot": snapshot,
             "reviewer_name": reviewer_name,
             "score": score,

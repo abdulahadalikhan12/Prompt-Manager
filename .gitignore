@@ -17,5 +17,14 @@ dist/
 review-service/reviews/*
 !review-service/reviews/.gitkeep
 
+# Document service storage (generated at runtime, not source)
+document-service/data/files/*
+document-service/data/meta/*
+!document-service/data/files/.gitkeep
+!document-service/data/meta/.gitkeep
+
 # OS
 .DS_Store
+
+# Claude Code local settings
+.claude/

@@ -11,26 +11,16 @@ class PromptCreate(BaseModel):
     name: str
     description: Optional[str] = None
     content: str
-    tags: Optional[str] = None
-    model_target: Optional[str] = None
 
 
 class PromptUpdate(BaseModel):
     """
-    What the client sends on PUT /prompts/{id}.
-
-    Every field is Optional with a default of None. This is what makes
-    "partial update supported" possible: the client can send just
-    {"tags": "new-tag"} and nothing else, and we'll know (in the route)
-    to only touch the `tags` column, leaving name/content/etc untouched.
-    If every field were required, a partial update would be impossible --
-    the client would be forced to resend the entire prompt every time.
+    What the client sends on PUT /prompts/{id}. Every field optional,
+    so partial updates work via exclude_unset in the service layer.
     """
     name: Optional[str] = None
     description: Optional[str] = None
     content: Optional[str] = None
-    tags: Optional[str] = None
-    model_target: Optional[str] = None
 
 
 class PromptOut(BaseModel):
@@ -40,8 +30,6 @@ class PromptOut(BaseModel):
     name: str
     description: Optional[str] = None
     content: str
-    tags: Optional[str] = None
-    model_target: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -55,15 +43,28 @@ class PromptOut(BaseModel):
 # ---------------- Week 2: chats and messages ----------------
 
 class MessageOut(BaseModel):
-    """A single turn in a chat -- either role='user' or role='assistant'."""
+    """A single turn in a chat -- either role='user' or role='assistant'.
+    The three token fields let the frontend show a System/Input/Output
+    breakdown without further math (input = prompt_tokens - system_tokens)."""
     id: UUID
     chat_id: UUID
     role: str
     content: str
+    system_tokens: int
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
     created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ChatDocumentOut(BaseModel):
+    id: UUID
+    chat_id: UUID
+    document_id: UUID
+    filename: str
+    attached_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -81,6 +82,7 @@ class ChatOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     messages: list[MessageOut] = []
+    documents: list[ChatDocumentOut] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -112,6 +114,37 @@ class FollowUpRequest(BaseModel):
     message in an already-open chat."""
     content: str
     model: Optional[str] = None
+
+
+class DocumentAttachment(BaseModel):
+    """One document to attach to a chat. Carries the metadata + text
+    that the frontend already received from document-service on upload,
+    so prompt-service does NOT have to call back into document-service --
+    same idea as why review-service snapshots a chat verbatim instead
+    of re-fetching it during summary calculations."""
+    document_id: UUID
+    filename: str
+    extracted_text: str
+
+
+class AttachDocumentRequest(BaseModel):
+    """Body for POST /chats/{chat_id}/documents. Reused inside
+    StartChatRequest as a list to seed a brand-new chat with attachments."""
+    document_id: UUID
+    filename: str
+    extracted_text: str
+
+
+class StartChatRequest(BaseModel):
+    """Body for POST /chats -- the user's first message in a brand-new
+    chat. The library/picker step is gone; sending the first message is
+    what creates both a prompt row (auto-named from the content) AND the
+    chat that hangs off it. Attachments are optional -- if present, they
+    are written into chat_documents before the first LLM call so the
+    system prompt for that very first turn already includes them."""
+    content: str
+    model: Optional[str] = None
+    attachments: list[DocumentAttachment] = []
 
 
 class SummaryOut(BaseModel):

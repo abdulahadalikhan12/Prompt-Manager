@@ -8,10 +8,18 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
+    // nginx + ngrok pass the public Host header through to Vite
+    allowedHosts: ['.ngrok-free.dev', '.ngrok-free.app', '.ngrok.app', '.ngrok.io'],
+    // HMR over ngrok HTTPS (browser must connect via wss on 443, not localhost)
+    hmr: {
+      clientPort: 443,
+      protocol: 'wss',
+    },
     proxy: {
       '/prompts': 'http://127.0.0.1:8000',
       '/chats': 'http://127.0.0.1:8000',
       '/reviews': 'http://127.0.0.1:8001',
+      '/documents': 'http://127.0.0.1:8003',
     },
   },
 })

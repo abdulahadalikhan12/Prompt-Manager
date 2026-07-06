@@ -28,11 +28,10 @@ def create_prompt(payload: PromptCreate, service: PromptService = Depends(get_pr
 
 @router.get("", response_model=list[PromptOut])
 def list_prompts(
-    tag: Optional[str] = Query(default=None),
     limit: Optional[int] = Query(default=None),
     service: PromptService = Depends(get_prompt_service),
 ):
-    return service.list(tag=tag, limit=limit)
+    return service.list(limit=limit)
 
 
 @router.get("/{prompt_id}", response_model=PromptOut)

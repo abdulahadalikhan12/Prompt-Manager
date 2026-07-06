@@ -23,8 +23,6 @@ class Prompt(Base):
     name = Column(String, nullable=False)
     description = Column(String, nullable=True)
     content = Column(Text, nullable=False)
-    tags = Column(String, nullable=True)  # comma-separated string, per spec
-    model_target = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
                          onupdate=lambda: datetime.now(timezone.utc))
@@ -61,14 +59,18 @@ class Chat(Base):
     prompt = relationship("Prompt", back_populates="chats")
     messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan",
                              order_by="Message.created_at")
+    documents = relationship("ChatDocument", back_populates="chat", cascade="all, delete-orphan",
+                              order_by="ChatDocument.attached_at")
 
 
 class Message(Base):
     """
     One turn in a Chat -- either the user's message or the assistant's
     reply. Token usage is stored per message (0 for user messages, real
-    values for assistant replies, since OpenRouter only reports usage
-    for the completion it generated) and summed up to Chat.total_tokens.
+    values for assistant replies). system_tokens is OUR locally-estimated
+    count of the system-prompt portion of the input, so the UI can show
+    a System / Input / Output breakdown -- OpenRouter only returns the
+    combined prompt_tokens, so this split is computed before the call.
     """
     __tablename__ = "messages"
 
@@ -76,9 +78,34 @@ class Message(Base):
     chat_id = Column(UUID(as_uuid=True), ForeignKey("chats.id"), nullable=False)
     role = Column(String, nullable=False)  # "user" or "assistant"
     content = Column(Text, nullable=False)
+    system_tokens = Column(Integer, default=0, nullable=False)
     prompt_tokens = Column(Integer, default=0, nullable=False)
     completion_tokens = Column(Integer, default=0, nullable=False)
     total_tokens = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     chat = relationship("Chat", back_populates="messages")
+
+
+class ChatDocument(Base):
+    """
+    A document attached to a chat. document_id is the id this document
+    holds in document-service -- it is NOT a SQL FK (different service,
+    different storage) but a foreign reference, same pattern as
+    review-service's prompt_id.
+
+    extracted_text is cached here at attach time so a follow-up turn
+    doesn't have to re-fetch the body from document-service every time
+    we assemble the system prompt. This trades a small amount of
+    duplication for predictable latency and self-contained chats.
+    """
+    __tablename__ = "chat_documents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    chat_id = Column(UUID(as_uuid=True), ForeignKey("chats.id"), nullable=False)
+    document_id = Column(UUID(as_uuid=True), nullable=False)
+    filename = Column(String, nullable=False)
+    extracted_text = Column(Text, nullable=False)
+    attached_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    chat = relationship("Chat", back_populates="documents")

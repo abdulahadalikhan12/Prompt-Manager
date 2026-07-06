@@ -1,47 +1,109 @@
 import { useState, useEffect, useRef } from "react";
-import { chatsApi, reviewsApi } from "./api";
+import { chatsApi, chatDocumentsApi, documentsApi } from "./api";
 
-// A full chat conversation view -- the "ChatGPT-type" piece. Takes a
-// chatId (already created via Execute) and renders the message history,
-// a follow-up input, a Summarize button, token totals, and a small
-// review form for the whole conversation.
-export default function ChatView({ chatId, onClose }) {
+const MAX_ATTACHMENTS = 3;
+
+// A single panel that does double duty:
+//   1. When chatId is null, it's the "new chat" composer -- empty state
+//      with a prompt that creates a chat on first send (POST /chats).
+//      Attached docs in this state live ONLY in pendingAttachments
+//      until the chat is created.
+//   2. When chatId is set, it's the live conversation view. Attached
+//      docs come from the chat itself (chat.documents) and new uploads
+//      hit POST /chats/{id}/documents directly.
+export default function ChatView({ chatId, onChatCreated, onChatChanged }) {
   const [chat, setChat] = useState(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState(null);
   const [summarizing, setSummarizing] = useState(false);
-  const [reviewerName, setReviewerName] = useState("");
-  const [reviewScore, setReviewScore] = useState(5);
-  const [reviewFeedback, setReviewFeedback] = useState("");
-  const [reviewSummary, setReviewSummary] = useState(null);
+  const [error, setError] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [pendingAttachments, setPendingAttachments] = useState([]); // only used pre-chat
   const bottomRef = useRef(null);
+  const textareaRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
-    loadChat();
-    loadReviewSummary();
+    setError(null);
+    setPendingAttachments([]);
+    if (chatId) {
+      loadChat();
+    } else {
+      setChat(null);
+    }
   }, [chatId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chat?.messages?.length]);
+  }, [chat?.messages?.length, sending]);
+
+  const isNew = !chatId;
+  const attachedDocs = isNew ? pendingAttachments : (chat?.documents || []);
+
+  function autoGrow(el) {
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 200) + "px";
+  }
 
   async function loadChat() {
     try {
       const data = await chatsApi.get(chatId);
       setChat(data);
-      setError(null);
     } catch (err) {
       setError(err.message);
     }
   }
 
-  async function loadReviewSummary() {
+  async function handleFilePicked(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";  // reset so the same file can be picked again later
+    if (!file) return;
+
+    if (attachedDocs.length >= MAX_ATTACHMENTS) {
+      setError(`At most ${MAX_ATTACHMENTS} documents per chat.`);
+      return;
+    }
+
+    setError(null);
+    setUploading(true);
     try {
-      const data = await reviewsApi.summaryForChat(chatId);
-      setReviewSummary(data);
-    } catch {
-      // non-fatal -- review summary is supplementary, chat itself still works
+      const doc = await documentsApi.upload(file);
+      // doc = { id, filename, kind, size_bytes, char_count, uploaded_at, text }
+      if (isNew) {
+        setPendingAttachments((prev) => [
+          ...prev,
+          {
+            document_id: doc.id,
+            filename: doc.filename,
+            extracted_text: doc.text,
+          },
+        ]);
+      } else {
+        await chatDocumentsApi.attach(chatId, {
+          document_id: doc.id,
+          filename: doc.filename,
+          extracted_text: doc.text,
+        });
+        await loadChat();
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleDetach(documentId) {
+    if (isNew) {
+      setPendingAttachments((prev) => prev.filter((d) => d.document_id !== documentId));
+      return;
+    }
+    try {
+      await chatDocumentsApi.detach(chatId, documentId);
+      await loadChat();
+    } catch (err) {
+      setError(err.message);
     }
   }
 
@@ -50,10 +112,18 @@ export default function ChatView({ chatId, onClose }) {
     if (!content || sending) return;
     setSending(true);
     setError(null);
+    setDraft("");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
     try {
-      await chatsApi.followUp(chatId, content);
-      setDraft("");
-      await loadChat();
+      if (!chatId) {
+        const created = await chatsApi.start(content, null, pendingAttachments);
+        setPendingAttachments([]);
+        onChatCreated?.(created);
+      } else {
+        await chatsApi.followUp(chatId, content);
+        await loadChat();
+        onChatChanged?.();
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -62,11 +132,13 @@ export default function ChatView({ chatId, onClose }) {
   }
 
   async function handleSummarize() {
+    if (!chatId) return;
     setSummarizing(true);
     setError(null);
     try {
       await chatsApi.summarize(chatId);
       await loadChat();
+      onChatChanged?.();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -74,108 +146,163 @@ export default function ChatView({ chatId, onClose }) {
     }
   }
 
-  async function handleSubmitReview() {
-    if (!reviewerName.trim() || !reviewFeedback.trim()) return;
-    try {
-      await reviewsApi.create({
-        target_type: "chat",
-        chat_id: chatId,
-        reviewer_name: reviewerName,
-        score: Number(reviewScore),
-        feedback: reviewFeedback,
-      });
-      setReviewerName("");
-      setReviewFeedback("");
-      loadReviewSummary();
-    } catch (err) {
-      setError(err.message);
-    }
-  }
-
-  if (!chat) {
-    return (
-      <div className="chat-view">
-        {error ? <div className="error-banner">{error}</div> : <p className="empty-state">Loading chat...</p>}
-      </div>
-    );
-  }
+  const headerTitle = isNew ? "New chat" : (chat?.title || "Loading…");
+  const tokenTotals = computeTotals(chat);
 
   return (
-    <div className="chat-view">
-      <div className="chat-header">
+    <div className="main">
+      <div className="main-header">
         <div>
-          <strong>{chat.title || "Chat"}</strong>
-          <span className="token-badge">{chat.total_tokens} tokens total</span>
+          <span className="title">{headerTitle}</span>
+          {chat && !isNew && tokenTotals && (
+            <span className="meta">
+              · sys {tokenTotals.system} · in {tokenTotals.input} · out {tokenTotals.output}
+            </span>
+          )}
         </div>
-        <div className="chat-header-actions">
-          <button onClick={handleSummarize} disabled={summarizing}>
-            {summarizing ? "Summarizing..." : "Summarize"}
-          </button>
-          <button onClick={onClose}>Close</button>
-        </div>
+        {!isNew && chat && (
+          <div className="header-actions">
+            <button className="icon-btn" onClick={handleSummarize} disabled={summarizing}>
+              {summarizing ? "Summarizing…" : "Summarize"}
+            </button>
+          </div>
+        )}
       </div>
 
-      {chat.summary && (
+      {attachedDocs.length > 0 && (
+        <div className="attachment-bar">
+          {attachedDocs.map((d) => (
+            <span className="attachment-pill" key={d.document_id || d.id}>
+              <span className="att-icon">▤</span>
+              <span className="att-name" title={d.filename}>{d.filename}</span>
+              <button
+                className="att-remove"
+                onClick={() => handleDetach(d.document_id || d.id)}
+                aria-label="Remove attachment"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {chat?.summary && (
         <div className="summary-panel">
-          <strong>Summary:</strong> {chat.summary}
+          <strong>Summary</strong> · {chat.summary}
         </div>
       )}
 
       {error && <div className="error-banner">{error}</div>}
 
-      <div className="messages">
-        {chat.messages.map((m) => (
-          <div key={m.id} className={`message message-${m.role}`}>
-            <div className="message-role">{m.role === "user" ? "You" : "Assistant"}</div>
-            <div className="message-content">{m.content}</div>
-            {m.role === "assistant" && m.total_tokens > 0 && (
-              <div className="message-tokens">{m.total_tokens} tokens</div>
-            )}
-          </div>
-        ))}
-        {sending && (
-          <div className="message message-assistant">
-            <div className="message-role">Assistant</div>
-            <div className="message-content loading-dots">Thinking...</div>
-          </div>
-        )}
-        <div ref={bottomRef} />
+      <div className="chat-scroll">
+        <div className="chat-inner">
+          {isNew && (
+            <div className="welcome" style={{ padding: "60px 20px" }}>
+              <h2>What can I help with?</h2>
+              <p>Attach PDFs with the paperclip, or type a message to start.</p>
+            </div>
+          )}
+
+          {chat?.messages?.map((m) => (
+            <div key={m.id} className={`message ${m.role}`}>
+              <div className="message-meta">
+                <span className="role">{m.role === "user" ? "You" : "Assistant"}</span>
+                {m.role === "assistant" && m.total_tokens > 0 && (
+                  <TokenBreakdown msg={m} />
+                )}
+              </div>
+              <div className="bubble">{m.content}</div>
+            </div>
+          ))}
+          {sending && (
+            <div className="message assistant">
+              <div className="message-meta"><span className="role">Assistant</span></div>
+              <div className="bubble">
+                <span className="typing-dots"><span /><span /><span /></span>
+              </div>
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
       </div>
 
-      <div className="chat-input-row">
-        <textarea
-          rows={2}
-          placeholder="Type a follow-up..."
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              handleSend();
-            }
-          }}
-        />
-        <button className="primary" onClick={handleSend} disabled={sending}>
-          Send
-        </button>
-      </div>
-
-      <div className="review-block">
-        <strong>Review this conversation</strong>
-        {reviewSummary && reviewSummary.review_count > 0 && (
-          <div className="summary-line">
-            {reviewSummary.average_score.toFixed(1)} average ({reviewSummary.review_count} review{reviewSummary.review_count > 1 ? "s" : ""})
+      <div className="composer-wrap">
+        <div className="composer">
+          <textarea
+            ref={textareaRef}
+            rows={1}
+            placeholder={isNew ? "Send a message to start a chat…" : "Send a follow-up message…"}
+            value={draft}
+            onChange={(e) => { setDraft(e.target.value); autoGrow(e.target); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+          />
+          <div className="composer-row">
+            <div className="composer-actions">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                style={{ display: "none" }}
+                onChange={handleFilePicked}
+              />
+              <button
+                className="attach-btn"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading || attachedDocs.length >= MAX_ATTACHMENTS}
+                title={attachedDocs.length >= MAX_ATTACHMENTS
+                  ? `Maximum ${MAX_ATTACHMENTS} documents per chat`
+                  : "Attach a PDF"}
+              >
+                {uploading ? "…" : "📎"}
+              </button>
+              <span className="composer-hint">
+                {attachedDocs.length}/{MAX_ATTACHMENTS} attached · Enter to send · Shift+Enter newline
+              </span>
+            </div>
+            <button
+              className="send-btn"
+              onClick={handleSend}
+              disabled={sending || !draft.trim()}
+              aria-label="Send"
+            >
+              ↑
+            </button>
           </div>
-        )}
-        <div className="review-form-row">
-          <input placeholder="Your name" value={reviewerName} onChange={(e) => setReviewerName(e.target.value)} />
-          <select value={reviewScore} onChange={(e) => setReviewScore(e.target.value)}>
-            {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-          <input placeholder="Feedback" value={reviewFeedback} onChange={(e) => setReviewFeedback(e.target.value)} />
-          <button onClick={handleSubmitReview}>Submit Review</button>
         </div>
       </div>
     </div>
   );
+}
+
+// Per-message token breakdown shown in the message metadata row.
+// input = prompt_tokens - system_tokens (rough but consistent with how
+// prompt-service split them before the call).
+function TokenBreakdown({ msg }) {
+  const sys = msg.system_tokens || 0;
+  const input = Math.max(0, (msg.prompt_tokens || 0) - sys);
+  const output = msg.completion_tokens || 0;
+  return (
+    <span className="token-split">
+      · sys {sys} · in {input} · out {output}
+    </span>
+  );
+}
+
+function computeTotals(chat) {
+  if (!chat?.messages) return null;
+  let system = 0, input = 0, output = 0;
+  for (const m of chat.messages) {
+    if (m.role !== "assistant") continue;
+    const sys = m.system_tokens || 0;
+    system += sys;
+    input += Math.max(0, (m.prompt_tokens || 0) - sys);
+    output += m.completion_tokens || 0;
+  }
+  return { system, input, output };
 }

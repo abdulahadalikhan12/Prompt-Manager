@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "start": "serve -s dist -l 5173",
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
@@ -22,6 +23,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
+    "serve": "^14.2.6",
     "vite": "^8.0.12"
   }
 }

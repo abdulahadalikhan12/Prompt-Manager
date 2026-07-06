@@ -1,126 +1,84 @@
 import { useState, useEffect } from "react";
-import { promptsApi, chatsApi } from "./api";
-import PromptForm from "./PromptForm";
-import ReviewBlock from "./ReviewBlock";
+import { chatsApi } from "./api";
+import Sidebar from "./Sidebar";
 import ChatView from "./ChatView";
-import HistoryPage from "./HistoryPage";
+import ReviewerPage from "./ReviewerPage";
 import "./App.css";
 
-function App() {
-  const [view, setView] = useState("prompts"); // "prompts" | "history"
-  const [prompts, setPrompts] = useState([]);
+export default function App() {
+  const [tab, setTab] = useState("user");          // "user" | "reviewer"
+  const [chats, setChats] = useState([]);
+  const [activeChatId, setActiveChatId] = useState(null);  // null => "new chat" mode
   const [error, setError] = useState(null);
-  const [openChatId, setOpenChatId] = useState(null);
-  const [executingId, setExecutingId] = useState(null);
 
-  useEffect(() => {
-    loadPrompts();
-  }, []);
+  useEffect(() => { refreshChats(); }, []);
 
-  async function loadPrompts() {
+  async function refreshChats() {
     try {
-      const data = await promptsApi.list();
-      setPrompts(data);
-      setError(null);
+      const c = await chatsApi.list();
+      setChats(c);
     } catch (err) {
       setError(err.message);
     }
   }
 
-  async function handleCreate(payload) {
-    try {
-      await promptsApi.create(payload);
-      loadPrompts();
-    } catch (err) {
-      setError(err.message);
-    }
+  function startNewChat() {
+    setActiveChatId(null);  // null = empty composer; first send creates the chat
   }
 
-  async function handleDelete(id) {
-    if (!window.confirm("Delete this prompt?")) return;
-    try {
-      await promptsApi.remove(id);
-      loadPrompts();
-    } catch (err) {
-      setError(err.message);
-    }
+  function handleChatCreated(chat) {
+    setActiveChatId(chat.id);
+    refreshChats();
   }
 
-  async function handleExecute(promptId) {
-    setExecutingId(promptId);
-    setError(null);
-    try {
-      const chat = await chatsApi.execute(promptId);
-      setOpenChatId(chat.id);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setExecutingId(null);
-    }
+  function handleChatDeleted(deletedId) {
+    refreshChats();
+    if (deletedId === activeChatId) setActiveChatId(null);
   }
 
   return (
     <div className="app">
-      <div className="app-header">
-        <h1>Prompt Manager</h1>
-        <div className="view-tabs">
-          <button className={view === "prompts" ? "tab active" : "tab"} onClick={() => setView("prompts")}>
-            Prompts
-          </button>
-          <button className={view === "history" ? "tab active" : "tab"} onClick={() => setView("history")}>
-            History
-          </button>
-        </div>
+      <div className="top-tabs">
+        <div className="brand">Prompt Manager</div>
+        <button
+          className={`tab ${tab === "user" ? "active" : ""}`}
+          onClick={() => setTab("user")}
+        >
+          User
+        </button>
+        <button
+          className={`tab ${tab === "reviewer" ? "active" : ""}`}
+          onClick={() => setTab("reviewer")}
+        >
+          Reviewer
+        </button>
       </div>
 
-      {error && <div className="error-banner">{error}</div>}
+      <div className="app-body">
+        {tab === "user" ? (
+          <>
+            <Sidebar
+              chats={chats}
+              activeChatId={activeChatId}
+              isNewChat={activeChatId === null}
+              onSelectChat={(id) => setActiveChatId(id)}
+              onNewChat={startNewChat}
+              onChatsChanged={handleChatDeleted}
+            />
 
-      {openChatId && (
-        <div className="chat-overlay">
-          <ChatView chatId={openChatId} onClose={() => { setOpenChatId(null); loadPrompts(); }} />
-        </div>
-      )}
+            {error && <div className="error-banner">{error}</div>}
 
-      {view === "prompts" && (
-        <>
-          <PromptForm onCreate={handleCreate} />
-
-          {prompts.length === 0 && <p className="empty-state">No prompts yet.</p>}
-
-          {prompts
-            .slice()
-            .reverse()
-            .map((prompt) => (
-              <div className="prompt-card" key={prompt.id}>
-                <h3>{prompt.name}</h3>
-                {prompt.description && <p>{prompt.description}</p>}
-                <p>{prompt.content}</p>
-                {prompt.tags && (
-                  <div className="tags">
-                    {prompt.tags.split(",").map((t) => (
-                      <span className="tag" key={t}>{t.trim()}</span>
-                    ))}
-                  </div>
-                )}
-                <div className="card-actions">
-                  <button
-                    className="primary"
-                    onClick={() => handleExecute(prompt.id)}
-                    disabled={executingId === prompt.id}
-                  >
-                    {executingId === prompt.id ? "Running..." : "Execute"}
-                  </button>
-                  <button onClick={() => handleDelete(prompt.id)}>Delete</button>
-                </div>
-                <ReviewBlock promptId={prompt.id} />
-              </div>
-            ))}
-        </>
-      )}
-
-      {view === "history" && <HistoryPage onOpenChat={(id) => setOpenChatId(id)} />}
+            <ChatView
+              key={activeChatId || "new"}
+              chatId={activeChatId}
+              onChatCreated={handleChatCreated}
+              onChatChanged={refreshChats}
+            />
+          </>
+        ) : (
+          <ReviewerPage />
+        )}
+      </div>
     </div>
   );
 }
-
-export default App;

@@ -30,10 +30,8 @@ class PromptService:
         self.db.refresh(new_prompt)
         return new_prompt
 
-    def list(self, tag: Optional[str] = None, limit: Optional[int] = None) -> list[Prompt]:
+    def list(self, limit: Optional[int] = None) -> list[Prompt]:
         query = self.db.query(Prompt)
-        if tag is not None:
-            query = query.filter(Prompt.tags.contains(tag))
         if limit is not None:
             query = query.limit(limit)
         return query.all()

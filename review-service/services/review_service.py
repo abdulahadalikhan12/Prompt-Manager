@@ -31,6 +31,8 @@ class ReviewService:
     async def create(self, payload: ReviewCreate) -> dict:
         if payload.target_type == "chat":
             snapshot = await self._fetch_chat_snapshot(payload.chat_id)
+        elif payload.target_type == "message":
+            snapshot = await self._fetch_message_snapshot(payload.chat_id, payload.message_id)
         else:
             snapshot = await self._fetch_prompt_snapshot(payload.prompt_id)
 
@@ -38,6 +40,7 @@ class ReviewService:
             target_type=payload.target_type,
             prompt_id=str(payload.prompt_id) if payload.prompt_id else None,
             chat_id=str(payload.chat_id) if payload.chat_id else None,
+            message_id=str(payload.message_id) if payload.message_id else None,
             snapshot=snapshot,
             reviewer_name=payload.reviewer_name,
             score=payload.score,
@@ -49,6 +52,21 @@ class ReviewService:
         snapshot is just the prompt's text content."""
         response = await self._get(f"/prompts/{prompt_id}")
         return response["content"]
+
+    async def _fetch_message_snapshot(self, chat_id: UUID, message_id: UUID) -> str:
+        """
+        Locates a single message inside a chat. There is intentionally
+        no GET /messages/{id} endpoint on prompt-service -- review-service
+        fetches the whole chat (which already includes every message
+        with its id and role) and scans for the matching one. This keeps
+        prompt-service's surface area minimal and avoids a second
+        cross-service endpoint that exists only to serve this flow.
+        """
+        chat = await self._get(f"/chats/{chat_id}")
+        for msg in chat.get("messages", []):
+            if msg.get("id") == str(message_id):
+                return msg["content"]
+        raise HTTPException(status_code=404, detail="Message not found in chat")
 
     async def _fetch_chat_snapshot(self, chat_id: UUID) -> dict:
         """
@@ -90,10 +108,12 @@ class ReviewService:
 
         return response.json()
 
-    def list_reviews(self, prompt_id: Optional[UUID] = None, chat_id: Optional[UUID] = None) -> list[dict]:
+    def list_reviews(self, prompt_id: Optional[UUID] = None, chat_id: Optional[UUID] = None,
+                     message_id: Optional[UUID] = None) -> list[dict]:
         return self.storage.get_all(
             prompt_id=str(prompt_id) if prompt_id else None,
             chat_id=str(chat_id) if chat_id else None,
+            message_id=str(message_id) if message_id else None,
         )
 
     def get(self, review_id: UUID) -> Optional[dict]:
@@ -104,6 +124,9 @@ class ReviewService:
 
     def summary_for_chat(self, chat_id: UUID) -> ReviewSummary:
         return self._build_summary(chat_id, self.storage.get_all(chat_id=str(chat_id)))
+
+    def summary_for_message(self, message_id: UUID) -> ReviewSummary:
+        return self._build_summary(message_id, self.storage.get_all(message_id=str(message_id)))
 
     def _build_summary(self, target_id: UUID, reviews: list[dict]) -> ReviewSummary:
         if not reviews:

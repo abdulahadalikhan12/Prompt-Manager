@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { chatsApi, chatDocumentsApi, documentsApi } from "./api";
 
 const MAX_ATTACHMENTS = 3;
@@ -212,7 +214,11 @@ export default function ChatView({ chatId, onChatCreated, onChatChanged }) {
                   <TokenBreakdown msg={m} />
                 )}
               </div>
-              <div className="bubble">{m.content}</div>
+              <div className="bubble">
+                {m.role === "assistant"
+                  ? <MarkdownMessage content={m.content} />
+                  : m.content}
+              </div>
             </div>
           ))}
           {sending && (
@@ -291,6 +297,49 @@ function TokenBreakdown({ msg }) {
     <span className="token-split">
       · sys {sys} · in {input} · out {output}
     </span>
+  );
+}
+
+function MarkdownMessage({ content }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        code({ inline, className, children, ...props }) {
+          const match = /language-(\w+)/.exec(className || "");
+          const text = String(children).replace(/\n$/, "");
+          if (inline) {
+            return <code className="inline-code" {...props}>{children}</code>;
+          }
+          return <CodeBlock language={match?.[1]} text={text} />;
+        },
+        pre({ children }) { return <>{children}</>; },
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+}
+
+function CodeBlock({ language, text }) {
+  const [copied, setCopied] = useState(false);
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {}
+  }
+  return (
+    <div className="code-block">
+      <div className="code-block-header">
+        <span className="code-lang">{language || "code"}</span>
+        <button className="code-copy" onClick={handleCopy}>
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <pre><code>{text}</code></pre>
+    </div>
   );
 }
 
